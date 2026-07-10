@@ -1,0 +1,20 @@
+{
+  "action": "update",
+  "type": "Issue",
+  "createdAt": "2026-07-13T15:00:00.000Z",
+  "data": {
+    "id": "research-issue-uuid-1",
+    "identifier": "SAS-120",
+    "title": "Evaluate streaming CSV libraries",
+    "description": "Spike notes on candidate libraries.",
+    "url": "https://linear.app/sashas-playground/issue/SAS-120/evaluate-streaming-csv-libraries",
+    "parentId": null,
+    "state": { "id": "edea16c6-4774-4c8d-8d24-34a213e13d66", "name": "Done", "type": "completed" },
+    "labelIds": ["2b121118-4ce1-49ba-bfe1-ca847bf258cc"],
+    "labels": [{ "id": "2b121118-4ce1-49ba-bfe1-ca847bf258cc", "name": "Research" }],
+    "project": { "id": "proj-1", "name": "Reporting" }
+  },
+  "updatedFrom": {
+    "stateId": "61068cfd-98e1-4c01-bfdd-faa21fbd45e3"
+  }
+}

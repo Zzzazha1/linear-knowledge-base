@@ -1,0 +1,20 @@
+{
+  "action": "update",
+  "type": "Issue",
+  "createdAt": "2026-07-12T09:30:00.000Z",
+  "data": {
+    "id": "bug-issue-uuid-1",
+    "identifier": "SAS-114",
+    "title": "Export hangs on reports with >50k rows",
+    "description": "Root cause: unbounded buffering before streaming starts. Fixed by flushing every 1000 rows.",
+    "url": "https://linear.app/sashas-playground/issue/SAS-114/export-hangs-on-large-reports",
+    "parentId": "feat-issue-uuid-1",
+    "state": { "id": "edea16c6-4774-4c8d-8d24-34a213e13d66", "name": "Done", "type": "completed" },
+    "labelIds": ["64de8e14-c2bd-45d6-b0ab-8d3de9873b4b"],
+    "labels": [{ "id": "64de8e14-c2bd-45d6-b0ab-8d3de9873b4b", "name": "Bug" }],
+    "project": { "id": "proj-1", "name": "Reporting" }
+  },
+  "updatedFrom": {
+    "stateId": "7d3688d9-f571-4817-9244-12f9d8bcad50"
+  }
+}

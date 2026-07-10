@@ -1,0 +1,20 @@
+{
+  "action": "update",
+  "type": "Issue",
+  "createdAt": "2026-07-10T12:00:00.000Z",
+  "data": {
+    "id": "feat-issue-uuid-1",
+    "identifier": "SAS-101",
+    "title": "Bulk CSV export for reports",
+    "description": "## Summary\nLets users export any report view as CSV.\n\n- Streams large exports\n- Respects current filters\n\n> Follow-up: add XLSX export later.",
+    "url": "https://linear.app/sashas-playground/issue/SAS-101/bulk-csv-export-for-reports",
+    "parentId": null,
+    "state": { "id": "edea16c6-4774-4c8d-8d24-34a213e13d66", "name": "Done", "type": "completed" },
+    "labelIds": ["535a846f-4bab-4a83-9277-3d073a8ded0d"],
+    "labels": [{ "id": "535a846f-4bab-4a83-9277-3d073a8ded0d", "name": "Feature" }],
+    "project": { "id": "proj-1", "name": "Reporting" }
+  },
+  "updatedFrom": {
+    "stateId": "1737ad35-06a1-426e-943a-99cabc32801e"
+  }
+}
