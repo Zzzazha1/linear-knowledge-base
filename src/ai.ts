@@ -62,31 +62,51 @@ export async function generateFeatureDescription(apiKey: string, rawDescription:
 }
 
 /**
- * Used on every Improvement/Bug/Tech-Refactoring completion. This does NOT
- * rewrite the existing Description — it writes a short, self-contained
- * update note describing what this one ticket changed, which gets appended
- * to the end of the Description section. The current description is passed
- * in purely as context (so the note doesn't clumsily restate something
- * already said), never as something to reproduce or edit.
+ * Used on every Improvement/Bug/Tech-Refactoring completion. Returns the
+ * FULL updated Description text with the new ticket's content woven in
+ * naturally, so a reader only ever needs the current text — not a trail of
+ * separate update notes — to understand the feature's current state.
+ *
+ * This is an edit, not a free rewrite: existing wording must be preserved
+ * verbatim wherever the new ticket doesn't touch it. The whole section gets
+ * replaced in Notion with this output (see replaceDescriptionSection), which
+ * is safe to do now that processing happens in the background
+ * (ctx.waitUntil) rather than being racing a webhook response timeout.
  */
-export async function describeTicketUpdate(
+export async function updateFeatureDescription(
   apiKey: string,
   currentDescription: string,
   ticket: SubTicketInfo
 ): Promise<string> {
   const prompt =
-    "You are adding a short update note to an existing feature's knowledge-base " +
-    "entry, for a ticket that just shipped. Write 1–3 sentences of plain prose " +
-    "describing specifically what this ticket changed or added for the " +
-    "feature, based on the ticket details below. Be factual and specific — " +
-    "don't invent information, don't restate the ticket title verbatim, and " +
-    "don't add a heading or bullet marker of your own (just the sentences).\n\n" +
-    "You are NOT rewriting or summarizing the whole feature — the current " +
-    "description below is given only so your note doesn't clumsily repeat " +
-    "something already stated. Do not reproduce, rephrase, or edit it.\n\n" +
-    `CURRENT DESCRIPTION (context only, do not reproduce):\n${currentDescription || "(empty)"}\n\n` +
+    "You maintain the knowledge-base \"Description\" for a software feature. " +
+    "Below is the CURRENT description, followed by a ticket that just shipped " +
+    "for it. Produce the FULL updated description — this text will completely " +
+    "replace the current one, so it must stand on its own as a complete, " +
+    "coherent description of the feature's current state. A reader should " +
+    "never need to look anywhere else (like a changelog) to understand what " +
+    "the feature does today.\n\n" +
+    "Rules:\n" +
+    "- Copy sentences and bullets the new ticket doesn't affect across " +
+    "verbatim. Do not rephrase, reorder, condense, or drop anything that's " +
+    "still accurate.\n" +
+    "- Weave the new ticket's content into the existing prose at the most " +
+    "relevant point — as a natural part of the description, not as a " +
+    "separate \"update\" paragraph, note, or bullet tacked onto the end. If it " +
+    "corrects or refines something already stated, edit that part in place. " +
+    "If it's a genuinely new detail, add it where a reader would expect to " +
+    "find it alongside related information.\n" +
+    "- Never let the newest ticket dominate the description or shift its " +
+    "focus — it should read exactly like a description someone wrote fresh " +
+    "today, with no sign of which detail was added most recently.\n" +
+    "- Do not shorten the description. If anything it should be the same " +
+    "length or slightly longer than the current version.\n" +
+    "- Do not invent facts that aren't present in either source.\n" +
+    "- Output only the description body — no title, and no heading that just " +
+    "repeats \"Description\" or \"Change History\".\n\n" +
+    `CURRENT DESCRIPTION:\n${currentDescription || "(empty)"}\n\n` +
     `NEW ${ticket.labelName.toUpperCase()} TICKET — "${ticket.title}":\n` +
     `${ticket.description || "(no additional detail was provided)"}`;
 
-  return callClaude(apiKey, prompt, 300);
+  return callClaude(apiKey, prompt, 1500);
 }

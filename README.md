@@ -8,7 +8,7 @@ database in sync, per the rules below.
 | Linear label | Trigger | Notion action |
 |---|---|---|
 | `Feature` | ticket moves to **Done** | Creates a new page in the Features database: title, project, Linear URL. The raw ticket description is sent to Claude to be rewritten into a clean knowledge-base entry, then inserted under a "Description" heading. Skipped if a page for that Linear URL already exists (idempotent). |
-| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link). Claude writes a short (1–3 sentence) update note describing just what this ticket changed, which is **appended** to the end of the Description section — the existing text is never touched or reworded. A plain (non-AI) dated entry is also logged under "Change History" (newest on top): `YYYY-MM-DD — Label: ticket title (link)`. |
+| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link). Claude reads the *current* Description plus the new ticket and produces a fully updated Description that weaves the change into the existing prose — replacing the section in Notion. A plain (non-AI) dated entry is also logged under "Change History" (newest on top): `YYYY-MM-DD — Label: ticket title (link)`. |
 | `Research` | any event | Ignored entirely — not synced. |
 
 If a sub-ticket (Improvement/Bug/Tech) reaches Done before its parent
@@ -17,22 +17,57 @@ yet — the worker logs a warning and skips it. Nothing retries automatically;
 re-triggering the sub-ticket's Done transition (e.g. toggling status) after
 the Feature exists will pick it up.
 
-**AI behavior and fallback.** The Description section is only ever appended
-to, never rewritten or deleted — each sub-ticket completion adds one short,
-Claude-written note about that specific change to the end of the section,
-so existing wording is never touched. (An earlier version of this worker
-did a full rewrite of the whole section on every update; that turned out to
-produce inconsistent results and involved deleting and re-inserting many
-Notion blocks per update, which was slower and more failure-prone. This
-append-only approach is deliberately simpler and more stable.) If the
-Anthropic API call fails for any reason (rate limit, outage, bad key), the
-worker logs the error and appends the raw ticket title/description instead
-of the AI note — so a Claude hiccup never drops the update. Change History
-entries are always plain text, no AI involved, so they're unaffected by any
-of this. Each Feature creation and sub-ticket completion makes one small
-Claude API call (`claude-haiku-4-5-20251001` by default — cheap and fast;
-change the model in `src/config.ts` if you want higher-effort prose from
-`claude-sonnet-5` instead).
+**AI behavior and fallback.** The Description is meant to always read as a
+single, current, coherent account of the feature — never a trail of
+separate per-ticket notes a reader has to piece together. To get that,
+`updateFeatureDescription` (`src/ai.ts`) is instructed to preserve existing
+wording verbatim wherever a new ticket doesn't touch it, and to weave in
+what changed at the most relevant point rather than appending a distinct
+paragraph. The whole section is then replaced in Notion
+(`replaceDescriptionSection`) with that output.
+
+This does mean deleting and re-inserting Notion blocks on every sub-ticket
+completion, same as an earlier version of this worker that caused
+instability — but the actual cause of that instability turned out to be
+unrelated to block replacement itself: the whole webhook handler ran
+synchronously before responding, and Linear's webhook delivery timed out
+and canceled the connection mid-flight while waiting on the full chain of
+Linear/Notion/Claude calls (visible in Cloudflare's logs as `outcome:
+"canceled"`). Since the worker now acknowledges the webhook immediately and
+does this processing in the background (`ctx.waitUntil`, see below), that
+time pressure is gone, which is what makes the full-replace approach safe
+to use again.
+
+If the Anthropic API call fails for any reason (rate limit, outage, bad
+key), the worker logs the error and falls back to a plain append of the
+raw ticket title/description instead of touching the existing Description
+at all — so a Claude hiccup never drops or corrupts the update. Change
+History entries are always plain text, no AI involved. Each Feature
+creation and sub-ticket completion makes one small Claude API call
+(`claude-haiku-4-5-20251001` by default — cheap and fast; change the model
+in `src/config.ts` if you want higher-effort prose from `claude-sonnet-5`
+instead).
+
+**Note on already-synced pages:** this only affects *future* updates. If a
+Feature's Description already has a stack of separate "Update (date): ..."
+notes from the earlier append-only behavior, those won't retroactively
+merge into prose — the next sub-ticket completion will treat all of that
+as part of the "current description" to preserve verbatim, not clean up.
+If you want a specific page's existing notes consolidated into one
+narrative now, that needs a one-off manual edit in Notion (or ask for a
+small one-off cleanup script).
+
+## Background processing (`ctx.waitUntil`)
+
+The Worker acknowledges Linear's webhook with `200 ok` immediately, then
+does the actual Linear/Notion/Claude work afterward via `ctx.waitUntil` —
+it doesn't make Linear wait on that chain of calls before responding. This
+avoids the webhook delivery timing out and getting canceled mid-request.
+The trade-off: Linear no longer sees a failing status code if something
+goes wrong during that background work, so it won't automatically retry.
+If a sync seems to be missing, check the Cloudflare dashboard's
+**Observability → Logs** for the Worker — failures are still logged there
+with the specific error.
 
 ## Pre-filled configuration
 
@@ -140,13 +175,6 @@ one (already the default in `src/config.ts`) before deploying for real.
 - **No cross-run state store**: idempotency for Feature creation is done by
   querying Notion for an existing page with that Linear URL before creating
   — reliable, but means every Feature-Done event does one extra Notion read.
-- **Fire-and-forget processing, no automatic retries**: the Worker
-  acknowledges Linear's webhook immediately (`200 ok`) and does the actual
-  Linear/Notion/Claude work afterward via `ctx.waitUntil`, rather than
-  making Linear wait on the full chain of API calls. This avoids Linear's
-  webhook delivery timing out and canceling the request mid-flight (which
-  could leave a page half-updated) — but it also means Linear no longer
-  sees a failing status code if something goes wrong during that background
-  work, so it won't automatically retry. If a sync seems to be missing,
-  check the Cloudflare dashboard's **Observability → Logs** for that
-  Worker; failures are logged there with the specific error.
+- **Fire-and-forget processing, no automatic retries**: see "Background
+  processing" above — Linear won't retry on a background failure since it
+  already got its `200`; check Observability → Logs if a sync seems missing.

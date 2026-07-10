@@ -7,9 +7,10 @@ import {
   appendToDescription,
   appendToHistory,
   getDescriptionMarkdown,
+  replaceDescriptionSection,
 } from "./notion";
 import { markdownToBlocks, heading2, bulleted, paragraph } from "./markdown";
-import { generateFeatureDescription, describeTicketUpdate } from "./ai";
+import { generateFeatureDescription, updateFeatureDescription } from "./ai";
 
 const LABEL_NAME_BY_ID: Record<string, string> = {
   [LABEL_IDS.Feature]: "Feature",
@@ -131,19 +132,20 @@ async function handleSubTicketDone(
   const today = new Date().toISOString().slice(0, 10);
   const ticketInfo = { title: issue.title, labelName, description: issue.description ?? "" };
 
-  // Append a short AI-written update note to the end of the Description —
-  // never a rewrite of the existing content, just one new addition. Falls
-  // back to the raw ticket text if the AI call fails, so a Claude hiccup
-  // never drops the update. This is a single append, no block deletion, so
-  // there's nothing here that can leave the page in a half-updated state.
+  // Replace the Description with a fully updated version that weaves the
+  // new ticket's content into the existing prose — so reading the current
+  // text alone tells you the feature's current state, with no need to also
+  // read through separate per-ticket notes. Safe to do as a full
+  // read-then-replace now that this runs in the background (ctx.waitUntil)
+  // rather than racing a webhook response timeout. Falls back to a plain
+  // append of the raw ticket text if the AI call fails, so a Claude hiccup
+  // never drops the update entirely.
   try {
     const currentDescription = await getDescriptionMarkdown(env.NOTION_TOKEN, pageId);
-    const updateNote = await describeTicketUpdate(env.ANTHROPIC_API_KEY, currentDescription, ticketInfo);
-    await appendToDescription(env.NOTION_TOKEN, pageId, [
-      paragraph(`**${labelName} update (${today}):** ${updateNote}`),
-    ]);
+    const updated = await updateFeatureDescription(env.ANTHROPIC_API_KEY, currentDescription, ticketInfo);
+    await replaceDescriptionSection(env.NOTION_TOKEN, pageId, updated);
   } catch (err) {
-    console.error(`AI update note failed for ${issue.url}, falling back to raw ticket text`, err);
+    console.error(`AI description update failed for ${issue.url}, falling back to raw append`, err);
     await appendToDescription(env.NOTION_TOKEN, pageId, [
       paragraph(`[${labelName}] ${issue.title}`),
       ...markdownToBlocks(issue.description),
