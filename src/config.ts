@@ -37,3 +37,8 @@ export const SECTION_HEADINGS = {
   description: "Description",
   history: "Change History",
 } as const;
+
+// Model used for the AI rewrite/summarization step. Haiku-class model:
+// fast and cheap, plenty for rewriting a knowledge-base paragraph. Swap to
+// "claude-sonnet-5" in this one place if you want higher-effort prose.
+export const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";

@@ -1,5 +1,5 @@
 import { NOTION_DATABASE_ID, NOTION_PROPS, SECTION_HEADINGS } from "./config";
-import { NotionBlock, heading2 } from "./markdown";
+import { NotionBlock, heading2, markdownToBlocks } from "./markdown";
 
 const NOTION_VERSION = "2022-06-28";
 const NOTION_API = "https://api.notion.com/v1";
@@ -121,4 +121,87 @@ export async function appendToHistory(token: string, pageId: string, blocks: Not
   const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
   const anchor = historyIdx >= 0 ? children[historyIdx].id : undefined;
   await appendChildren(token, pageId, blocks, anchor);
+}
+
+/** Renders a list of Notion (read-API-shaped) blocks back into rough Markdown. */
+function renderBlocksToMarkdown(blocks: BlockListItem[]): string {
+  const lines: string[] = [];
+  for (const block of blocks) {
+    const type = block.type;
+    const richText = block[type]?.rich_text ?? [];
+    const text = richText.map((t: any) => t.plain_text ?? t.text?.content ?? "").join("");
+
+    switch (type) {
+      case "heading_1":
+        lines.push(`# ${text}`);
+        break;
+      case "heading_2":
+        lines.push(`## ${text}`);
+        break;
+      case "heading_3":
+        lines.push(`### ${text}`);
+        break;
+      case "bulleted_list_item":
+        lines.push(`- ${text}`);
+        break;
+      case "numbered_list_item":
+        lines.push(`1. ${text}`);
+        break;
+      case "to_do":
+        lines.push(`- [${block.to_do?.checked ? "x" : " "}] ${text}`);
+        break;
+      case "quote":
+        lines.push(`> ${text}`);
+        break;
+      case "code":
+        lines.push(`\`\`\`\n${text}\n\`\`\``);
+        break;
+      default:
+        if (text) lines.push(text);
+    }
+  }
+  return lines.join("\n\n");
+}
+
+/** Reads the current "Description" section (between the two headings) as Markdown-ish text. */
+export async function getDescriptionMarkdown(token: string, pageId: string): Promise<string> {
+  const children = await listChildren(token, pageId);
+  const descIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.description);
+  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  if (descIdx < 0) return "";
+  const end = historyIdx > descIdx ? historyIdx : children.length;
+  return renderBlocksToMarkdown(children.slice(descIdx + 1, end));
+}
+
+async function deleteBlock(token: string, blockId: string): Promise<void> {
+  await notionFetch(token, `/blocks/${blockId}`, { method: "DELETE" });
+}
+
+/**
+ * Replaces the entire contents of the "Description" section with freshly
+ * generated Markdown — used when the AI has rewritten the whole narrative
+ * rather than just adding a paragraph.
+ */
+export async function replaceDescriptionSection(token: string, pageId: string, newMarkdown: string): Promise<void> {
+  const children = await listChildren(token, pageId);
+  const descIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.description);
+  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  if (descIdx < 0) return; // malformed page; leave it alone rather than guessing
+
+  const end = historyIdx > descIdx ? historyIdx : children.length;
+  const staleBlocks = children.slice(descIdx + 1, end);
+
+  // Notion has no bulk-delete endpoint — remove the old section's blocks
+  // one at a time, then insert the freshly generated ones in their place.
+  for (const block of staleBlocks) {
+    await deleteBlock(token, block.id);
+  }
+
+  const newBlocks = markdownToBlocks(newMarkdown);
+  await appendChildren(
+    token,
+    pageId,
+    newBlocks.length ? newBlocks : [{ object: "block", type: "paragraph", paragraph: { rich_text: [] } }],
+    children[descIdx].id
+  );
 }

@@ -2,6 +2,7 @@ export interface Env {
   LINEAR_API_KEY: string;
   LINEAR_WEBHOOK_SECRET: string;
   NOTION_TOKEN: string;
+  ANTHROPIC_API_KEY: string;
 }
 
 // Subset of Linear's webhook "Issue" payload we actually use.

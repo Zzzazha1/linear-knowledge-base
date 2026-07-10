@@ -1,8 +1,16 @@
 import { Env, LinearWebhookPayload } from "./types";
 import { LABEL_IDS, STATE_DONE_ID, SUB_TICKET_LABELS } from "./config";
 import { verifyLinearSignature, resolveParentFeature } from "./linear";
-import { createFeaturePage, findFeaturePageByUrl, appendToDescription, appendToHistory } from "./notion";
+import {
+  createFeaturePage,
+  findFeaturePageByUrl,
+  appendToDescription,
+  appendToHistory,
+  getDescriptionMarkdown,
+  replaceDescriptionSection,
+} from "./notion";
 import { markdownToBlocks, heading2, bulleted, paragraph } from "./markdown";
+import { generateFeatureDescription, rewriteDescriptionWithUpdate, summarizeChangeEntry } from "./ai";
 
 const LABEL_NAME_BY_ID: Record<string, string> = {
   [LABEL_IDS.Feature]: "Feature",
@@ -74,12 +82,21 @@ async function handleFeatureDone(issue: LinearWebhookPayload["data"], env: Env):
   const existing = await findFeaturePageByUrl(env.NOTION_TOKEN, issue.url);
   if (existing) return; // already synced (duplicate delivery, or was Done before)
 
-  const descriptionBlocks = markdownToBlocks(issue.description);
+  const rawDescription = issue.description ?? "";
+  let descriptionMarkdown = rawDescription;
+  try {
+    descriptionMarkdown = await generateFeatureDescription(env.ANTHROPIC_API_KEY, rawDescription);
+  } catch (err) {
+    // AI polish is a nice-to-have on creation — never let it block getting
+    // the Feature into Notion at all.
+    console.error(`AI polish failed for ${issue.url}, using raw description`, err);
+  }
+
   await createFeaturePage(env.NOTION_TOKEN, {
     title: issue.title,
     project: issue.project?.name ?? "",
     linearUrl: issue.url,
-    descriptionBlocks,
+    descriptionBlocks: markdownToBlocks(descriptionMarkdown),
   });
 }
 
@@ -104,15 +121,33 @@ async function handleSubTicketDone(
 
   const labelName = LABEL_NAME_BY_ID[subTicketLabelId] ?? "Update";
   const today = new Date().toISOString().slice(0, 10);
+  const ticketInfo = { title: issue.title, labelName, description: issue.description ?? "" };
 
-  // Append the ticket's own detail to the running Description narrative.
-  await appendToDescription(env.NOTION_TOKEN, pageId, [
-    paragraph(`[${labelName}] ${issue.title}`),
-    ...markdownToBlocks(issue.description),
-  ]);
+  // Full rewrite of the Description section, folding the new ticket into the
+  // existing narrative — falls back to a plain append if the AI call fails,
+  // so a Claude/API hiccup never drops the update entirely.
+  try {
+    const currentDescription = await getDescriptionMarkdown(env.NOTION_TOKEN, pageId);
+    const rewritten = await rewriteDescriptionWithUpdate(env.ANTHROPIC_API_KEY, currentDescription, ticketInfo);
+    await replaceDescriptionSection(env.NOTION_TOKEN, pageId, rewritten);
+  } catch (err) {
+    console.error(`AI rewrite failed for ${issue.url}, falling back to plain append`, err);
+    await appendToDescription(env.NOTION_TOKEN, pageId, [
+      paragraph(`[${labelName}] ${issue.title}`),
+      ...markdownToBlocks(issue.description),
+    ]);
+  }
 
-  // Log a dated entry in Change History (newest on top).
+  // Log a dated entry in Change History (newest on top) — AI-summarized,
+  // falling back to the raw title if the summary call fails.
+  let summary = issue.title;
+  try {
+    summary = await summarizeChangeEntry(env.ANTHROPIC_API_KEY, ticketInfo);
+  } catch (err) {
+    console.error(`AI summary failed for ${issue.url}, using raw title`, err);
+  }
+
   await appendToHistory(env.NOTION_TOKEN, pageId, [
-    bulleted(`${today} — ${labelName}: ${issue.title} (${issue.url})`),
+    bulleted(`${today} — ${labelName}: ${summary} ([${issue.title}](${issue.url}))`),
   ]);
 }

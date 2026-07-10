@@ -6,3 +6,5 @@ compatibility_date = "2024-11-01"
 #   LINEAR_API_KEY        - Linear personal API key or OAuth token with read access
 #   LINEAR_WEBHOOK_SECRET  - signing secret shown when you create the webhook in Linear
 #   NOTION_TOKEN            - Notion internal integration secret, shared with the DB
+#   ANTHROPIC_API_KEY       - Anthropic API key (console.anthropic.com), used to
+#                             rewrite Feature descriptions and summarize changes

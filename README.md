@@ -7,8 +7,8 @@ database in sync, per the rules below.
 
 | Linear label | Trigger | Notion action |
 |---|---|---|
-| `Feature` | ticket moves to **Done** | Creates a new page in the Features database: title, project, Linear URL, and the issue description converted into blocks under a "Description" heading. Skipped if a page for that Linear URL already exists (idempotent). |
-| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link), then appends the ticket's own detail to the end of the Feature's Description section, and logs a dated entry under "Change History" (newest on top). |
+| `Feature` | ticket moves to **Done** | Creates a new page in the Features database: title, project, Linear URL. The raw ticket description is sent to Claude to be rewritten into a clean knowledge-base entry, then inserted under a "Description" heading. Skipped if a page for that Linear URL already exists (idempotent). |
+| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link), then sends the *current* Description text plus the new ticket to Claude, which rewrites the **entire** Description section as one coherent narrative (not just appended). A separate Claude call writes a one-sentence summary that's logged as a dated entry under "Change History" (newest on top). |
 | `Research` | any event | Ignored entirely — not synced. |
 
 If a sub-ticket (Improvement/Bug/Tech) reaches Done before its parent
@@ -16,6 +16,21 @@ Feature has ever reached Done itself, there's no Notion page to attach to
 yet — the worker logs a warning and skips it. Nothing retries automatically;
 re-triggering the sub-ticket's Done transition (e.g. toggling status) after
 the Feature exists will pick it up.
+
+**AI rewrite behavior and fallback.** Every Description rewrite is a *full*
+regeneration: the worker reads back whatever's currently in the Description
+section, hands it to Claude along with the new ticket, and replaces the
+whole section with Claude's output. This keeps it reading as one narrative
+long-term, but it does mean existing wording can get lightly rephrased on
+every update — that's inherent to the "rewrite, don't append" approach. If
+the Anthropic API call fails for any reason (rate limit, outage, bad key),
+the worker logs the error and falls back to the old plain-append behavior
+for that one event rather than dropping the sync entirely — so a Claude
+hiccup degrades gracefully instead of silently losing an update. Each
+Feature creation and sub-ticket completion makes one or two small Claude
+API calls (`claude-haiku-4-5-20251001` by default — cheap and fast; change
+the model in `src/config.ts` if you want higher-effort prose from
+`claude-sonnet-5` instead).
 
 ## Pre-filled configuration
 
@@ -50,6 +65,13 @@ integration instead:
 <https://linear.app/settings/api> → **Personal API keys** → create one with
 read access to your workspace. Copy it.
 
+### 2b. Anthropic API key
+
+<https://console.anthropic.com> → **API Keys** → **Create Key** → copy it
+(starts with `sk-ant-`). This is what powers the description rewriting and
+change summaries — see "AI rewrite behavior" above for what it's used for
+and what happens if a call fails.
+
 ### 3. Linear webhook
 
 <https://linear.app/settings/api> → **Webhooks** → **New webhook**:
@@ -71,10 +93,14 @@ npm install
 ```bash
 npx wrangler login
 npx wrangler secret put LINEAR_API_KEY
-npx wrangler secret put LINEAR_WEBHOOK_SECRET
 npx wrangler secret put NOTION_TOKEN
+npx wrangler secret put ANTHROPIC_API_KEY
 npm run deploy
 ```
+
+(`LINEAR_WEBHOOK_SECRET` isn't set yet — deploying doesn't require it. Set
+it after creating the webhook below, once Linear gives you the real signing
+secret.)
 
 `wrangler deploy` prints the Worker's URL — that's what goes in the Linear
 webhook config from step 3 (create or update the webhook with it now).
