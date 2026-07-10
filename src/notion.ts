@@ -87,6 +87,23 @@ function headingText(block: BlockListItem): string | null {
   return richText.map((t: any) => t.plain_text ?? t.text?.content ?? "").join("");
 }
 
+/**
+ * Finds the LAST block matching a given heading label. Used for the "Change
+ * History" heading specifically: if AI-generated content ever echoes that
+ * exact phrase as a heading of its own within the Description section
+ * (which sits before the real "Change History" heading), a first-match
+ * search would latch onto that impostor instead of the real section —
+ * silently inserting history entries into the middle of the description.
+ * The real heading is created once and never touched again, so it's always
+ * the last match.
+ */
+function findLastHeadingIndex(children: BlockListItem[], label: string): number {
+  for (let i = children.length - 1; i >= 0; i--) {
+    if (headingText(children[i]) === label) return i;
+  }
+  return -1;
+}
+
 async function appendChildren(token: string, blockId: string, children: NotionBlock[], after?: string) {
   await notionFetch(token, `/blocks/${blockId}/children`, {
     method: "PATCH",
@@ -102,7 +119,7 @@ async function appendChildren(token: string, blockId: string, children: NotionBl
 export async function appendToDescription(token: string, pageId: string, blocks: NotionBlock[]) {
   const children = await listChildren(token, pageId);
   const descIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.description);
-  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  const historyIdx = findLastHeadingIndex(children, SECTION_HEADINGS.history);
 
   let anchor: string | undefined;
   if (historyIdx > 0) {
@@ -118,7 +135,7 @@ export async function appendToDescription(token: string, pageId: string, blocks:
  */
 export async function appendToHistory(token: string, pageId: string, blocks: NotionBlock[]) {
   const children = await listChildren(token, pageId);
-  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  const historyIdx = findLastHeadingIndex(children, SECTION_HEADINGS.history);
   const anchor = historyIdx >= 0 ? children[historyIdx].id : undefined;
   await appendChildren(token, pageId, blocks, anchor);
 }
@@ -167,7 +184,7 @@ function renderBlocksToMarkdown(blocks: BlockListItem[]): string {
 export async function getDescriptionMarkdown(token: string, pageId: string): Promise<string> {
   const children = await listChildren(token, pageId);
   const descIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.description);
-  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  const historyIdx = findLastHeadingIndex(children, SECTION_HEADINGS.history);
   if (descIdx < 0) return "";
   const end = historyIdx > descIdx ? historyIdx : children.length;
   return renderBlocksToMarkdown(children.slice(descIdx + 1, end));
@@ -185,7 +202,7 @@ async function deleteBlock(token: string, blockId: string): Promise<void> {
 export async function replaceDescriptionSection(token: string, pageId: string, newMarkdown: string): Promise<void> {
   const children = await listChildren(token, pageId);
   const descIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.description);
-  const historyIdx = children.findIndex((b) => headingText(b) === SECTION_HEADINGS.history);
+  const historyIdx = findLastHeadingIndex(children, SECTION_HEADINGS.history);
   if (descIdx < 0) return; // malformed page; leave it alone rather than guessing
 
   const end = historyIdx > descIdx ? historyIdx : children.length;

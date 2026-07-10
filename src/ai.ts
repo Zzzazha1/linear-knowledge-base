@@ -53,16 +53,18 @@ export async function generateFeatureDescription(apiKey: string, rawDescription:
     "knowledge-base entry for this feature. Preserve every factual detail " +
     "(behavior, scope, technical notes). Improve structure and clarity, and use " +
     "headings or bullets where they genuinely help — but don't invent " +
-    "information that isn't present in the source.\n\n" +
+    "information that isn't present in the source. Output only the body content " +
+    "itself — don't give it a title or heading that just repeats \"Description\" " +
+    "or \"Change History\".\n\n" +
     `Raw ticket description:\n${rawDescription || "(no description was provided)"}`;
 
   return callClaude(apiKey, prompt, 1024);
 }
 
 /**
- * Used on every Improvement/Bug/Tech-Refactoring completion: regenerates the
- * ENTIRE Description section as one coherent narrative, folding in the new
- * ticket rather than just tacking a paragraph onto the end.
+ * Used on every Improvement/Bug/Tech-Refactoring completion: makes a
+ * minimally-invasive edit to the Description — preserve almost everything
+ * verbatim, only touch the part(s) the new ticket actually affects.
  */
 export async function rewriteDescriptionWithUpdate(
   apiKey: string,
@@ -72,16 +74,30 @@ export async function rewriteDescriptionWithUpdate(
   const prompt =
     "You maintain the knowledge-base \"Description\" section for a software " +
     "feature. Below is the CURRENT description, followed by a NEW update that " +
-    "just shipped. Rewrite the full description to incorporate the new update " +
-    "coherently as a single narrative — integrate the new information where it " +
-    "fits naturally, rather than appending a disconnected paragraph. Preserve " +
-    "existing factual details unless the new update explicitly supersedes them. " +
-    "Do not invent facts that aren't present in either source.\n\n" +
+    "just shipped for it.\n\n" +
+    "Your edit must be minimally invasive:\n" +
+    "- Treat the CURRENT DESCRIPTION as correct and complete except where the " +
+    "NEW UPDATE changes it. Copy unaffected sentences and bullets across " +
+    "verbatim — do not rephrase, reorder, condense, or summarize any part of " +
+    "the current description that the new update doesn't touch.\n" +
+    "- Identify only the specific detail(s) the new update actually changes " +
+    "(a bug fix, a behavior tweak, a new capability, a refactor). Edit just " +
+    "that sentence/bullet in place if the update corrects or refines it, or " +
+    "add one new short sentence/bullet in the most relevant existing spot if " +
+    "it's a genuinely new detail. This is an edit, not a rewrite.\n" +
+    "- Never shift the description's overall focus toward the newest change — " +
+    "it should still read primarily as a description of the feature as a " +
+    "whole, with the update woven in as one detail among the others.\n" +
+    "- Do not shorten the description. If anything, it should be the same " +
+    "length or very slightly longer than the current version.\n" +
+    "- Do not invent facts that aren't present in either source.\n" +
+    "- Output only the body content itself — don't give it a title or heading " +
+    "that just repeats \"Description\" or \"Change History\".\n\n" +
     `CURRENT DESCRIPTION:\n${currentDescription || "(empty)"}\n\n` +
     `NEW ${ticket.labelName.toUpperCase()} UPDATE — "${ticket.title}":\n` +
     `${ticket.description || "(no additional detail was provided)"}`;
 
-  return callClaude(apiKey, prompt, 1200);
+  return callClaude(apiKey, prompt, 1500);
 }
 
 /**
