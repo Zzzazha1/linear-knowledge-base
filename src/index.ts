@@ -7,10 +7,9 @@ import {
   appendToDescription,
   appendToHistory,
   getDescriptionMarkdown,
-  replaceDescriptionSection,
 } from "./notion";
 import { markdownToBlocks, heading2, bulleted, paragraph } from "./markdown";
-import { generateFeatureDescription, rewriteDescriptionWithUpdate, summarizeChangeEntry } from "./ai";
+import { generateFeatureDescription, describeTicketUpdate } from "./ai";
 
 const LABEL_NAME_BY_ID: Record<string, string> = {
   [LABEL_IDS.Feature]: "Feature",
@@ -123,31 +122,27 @@ async function handleSubTicketDone(
   const today = new Date().toISOString().slice(0, 10);
   const ticketInfo = { title: issue.title, labelName, description: issue.description ?? "" };
 
-  // Full rewrite of the Description section, folding the new ticket into the
-  // existing narrative — falls back to a plain append if the AI call fails,
-  // so a Claude/API hiccup never drops the update entirely.
+  // Append a short AI-written update note to the end of the Description —
+  // never a rewrite of the existing content, just one new addition. Falls
+  // back to the raw ticket text if the AI call fails, so a Claude hiccup
+  // never drops the update. This is a single append, no block deletion, so
+  // there's nothing here that can leave the page in a half-updated state.
   try {
     const currentDescription = await getDescriptionMarkdown(env.NOTION_TOKEN, pageId);
-    const rewritten = await rewriteDescriptionWithUpdate(env.ANTHROPIC_API_KEY, currentDescription, ticketInfo);
-    await replaceDescriptionSection(env.NOTION_TOKEN, pageId, rewritten);
+    const updateNote = await describeTicketUpdate(env.ANTHROPIC_API_KEY, currentDescription, ticketInfo);
+    await appendToDescription(env.NOTION_TOKEN, pageId, [
+      paragraph(`**${labelName} update (${today}):** ${updateNote}`),
+    ]);
   } catch (err) {
-    console.error(`AI rewrite failed for ${issue.url}, falling back to plain append`, err);
+    console.error(`AI update note failed for ${issue.url}, falling back to raw ticket text`, err);
     await appendToDescription(env.NOTION_TOKEN, pageId, [
       paragraph(`[${labelName}] ${issue.title}`),
       ...markdownToBlocks(issue.description),
     ]);
   }
 
-  // Log a dated entry in Change History (newest on top) — AI-summarized,
-  // falling back to the raw title if the summary call fails.
-  let summary = issue.title;
-  try {
-    summary = await summarizeChangeEntry(env.ANTHROPIC_API_KEY, ticketInfo);
-  } catch (err) {
-    console.error(`AI summary failed for ${issue.url}, using raw title`, err);
-  }
-
+  // Change History: plain append, no AI — just log that this ticket completed.
   await appendToHistory(env.NOTION_TOKEN, pageId, [
-    bulleted(`${today} — ${labelName}: ${summary} ([${issue.title}](${issue.url}))`),
+    bulleted(`${today} — ${labelName}: ${issue.title} (${issue.url})`),
   ]);
 }

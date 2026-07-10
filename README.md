@@ -8,7 +8,7 @@ database in sync, per the rules below.
 | Linear label | Trigger | Notion action |
 |---|---|---|
 | `Feature` | ticket moves to **Done** | Creates a new page in the Features database: title, project, Linear URL. The raw ticket description is sent to Claude to be rewritten into a clean knowledge-base entry, then inserted under a "Description" heading. Skipped if a page for that Linear URL already exists (idempotent). |
-| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link), then sends the *current* Description text plus the new ticket to Claude, which rewrites the **entire** Description section as one coherent narrative (not just appended). A separate Claude call writes a one-sentence summary that's logged as a dated entry under "Change History" (newest on top). |
+| `Improvement` / `Bug` / `Tech / Refactoring` | ticket moves to **Done** | Resolves the parent Feature (native sub-issue `parentId` first, falls back to a "related issue" link). Claude writes a short (1–3 sentence) update note describing just what this ticket changed, which is **appended** to the end of the Description section — the existing text is never touched or reworded. A plain (non-AI) dated entry is also logged under "Change History" (newest on top): `YYYY-MM-DD — Label: ticket title (link)`. |
 | `Research` | any event | Ignored entirely — not synced. |
 
 If a sub-ticket (Improvement/Bug/Tech) reaches Done before its parent
@@ -17,19 +17,21 @@ yet — the worker logs a warning and skips it. Nothing retries automatically;
 re-triggering the sub-ticket's Done transition (e.g. toggling status) after
 the Feature exists will pick it up.
 
-**AI rewrite behavior and fallback.** Every Description rewrite is a *full*
-regeneration: the worker reads back whatever's currently in the Description
-section, hands it to Claude along with the new ticket, and replaces the
-whole section with Claude's output. This keeps it reading as one narrative
-long-term, but it does mean existing wording can get lightly rephrased on
-every update — that's inherent to the "rewrite, don't append" approach. If
-the Anthropic API call fails for any reason (rate limit, outage, bad key),
-the worker logs the error and falls back to the old plain-append behavior
-for that one event rather than dropping the sync entirely — so a Claude
-hiccup degrades gracefully instead of silently losing an update. Each
-Feature creation and sub-ticket completion makes one or two small Claude
-API calls (`claude-haiku-4-5-20251001` by default — cheap and fast; change
-the model in `src/config.ts` if you want higher-effort prose from
+**AI behavior and fallback.** The Description section is only ever appended
+to, never rewritten or deleted — each sub-ticket completion adds one short,
+Claude-written note about that specific change to the end of the section,
+so existing wording is never touched. (An earlier version of this worker
+did a full rewrite of the whole section on every update; that turned out to
+produce inconsistent results and involved deleting and re-inserting many
+Notion blocks per update, which was slower and more failure-prone. This
+append-only approach is deliberately simpler and more stable.) If the
+Anthropic API call fails for any reason (rate limit, outage, bad key), the
+worker logs the error and appends the raw ticket title/description instead
+of the AI note — so a Claude hiccup never drops the update. Change History
+entries are always plain text, no AI involved, so they're unaffected by any
+of this. Each Feature creation and sub-ticket completion makes one small
+Claude API call (`claude-haiku-4-5-20251001` by default — cheap and fast;
+change the model in `src/config.ts` if you want higher-effort prose from
 `claude-sonnet-5` instead).
 
 ## Pre-filled configuration

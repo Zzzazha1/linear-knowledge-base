@@ -62,55 +62,31 @@ export async function generateFeatureDescription(apiKey: string, rawDescription:
 }
 
 /**
- * Used on every Improvement/Bug/Tech-Refactoring completion: makes a
- * minimally-invasive edit to the Description — preserve almost everything
- * verbatim, only touch the part(s) the new ticket actually affects.
+ * Used on every Improvement/Bug/Tech-Refactoring completion. This does NOT
+ * rewrite the existing Description — it writes a short, self-contained
+ * update note describing what this one ticket changed, which gets appended
+ * to the end of the Description section. The current description is passed
+ * in purely as context (so the note doesn't clumsily restate something
+ * already said), never as something to reproduce or edit.
  */
-export async function rewriteDescriptionWithUpdate(
+export async function describeTicketUpdate(
   apiKey: string,
   currentDescription: string,
   ticket: SubTicketInfo
 ): Promise<string> {
   const prompt =
-    "You maintain the knowledge-base \"Description\" section for a software " +
-    "feature. Below is the CURRENT description, followed by a NEW update that " +
-    "just shipped for it.\n\n" +
-    "Your edit must be minimally invasive:\n" +
-    "- Treat the CURRENT DESCRIPTION as correct and complete except where the " +
-    "NEW UPDATE changes it. Copy unaffected sentences and bullets across " +
-    "verbatim — do not rephrase, reorder, condense, or summarize any part of " +
-    "the current description that the new update doesn't touch.\n" +
-    "- Identify only the specific detail(s) the new update actually changes " +
-    "(a bug fix, a behavior tweak, a new capability, a refactor). Edit just " +
-    "that sentence/bullet in place if the update corrects or refines it, or " +
-    "add one new short sentence/bullet in the most relevant existing spot if " +
-    "it's a genuinely new detail. This is an edit, not a rewrite.\n" +
-    "- Never shift the description's overall focus toward the newest change — " +
-    "it should still read primarily as a description of the feature as a " +
-    "whole, with the update woven in as one detail among the others.\n" +
-    "- Do not shorten the description. If anything, it should be the same " +
-    "length or very slightly longer than the current version.\n" +
-    "- Do not invent facts that aren't present in either source.\n" +
-    "- Output only the body content itself — don't give it a title or heading " +
-    "that just repeats \"Description\" or \"Change History\".\n\n" +
-    `CURRENT DESCRIPTION:\n${currentDescription || "(empty)"}\n\n` +
-    `NEW ${ticket.labelName.toUpperCase()} UPDATE — "${ticket.title}":\n` +
+    "You are adding a short update note to an existing feature's knowledge-base " +
+    "entry, for a ticket that just shipped. Write 1–3 sentences of plain prose " +
+    "describing specifically what this ticket changed or added for the " +
+    "feature, based on the ticket details below. Be factual and specific — " +
+    "don't invent information, don't restate the ticket title verbatim, and " +
+    "don't add a heading or bullet marker of your own (just the sentences).\n\n" +
+    "You are NOT rewriting or summarizing the whole feature — the current " +
+    "description below is given only so your note doesn't clumsily repeat " +
+    "something already stated. Do not reproduce, rephrase, or edit it.\n\n" +
+    `CURRENT DESCRIPTION (context only, do not reproduce):\n${currentDescription || "(empty)"}\n\n` +
+    `NEW ${ticket.labelName.toUpperCase()} TICKET — "${ticket.title}":\n` +
     `${ticket.description || "(no additional detail was provided)"}`;
 
-  return callClaude(apiKey, prompt, 1500);
-}
-
-/**
- * Used on every Improvement/Bug/Tech-Refactoring completion: a short,
- * specific summary sentence for the dated Change History entry.
- */
-export async function summarizeChangeEntry(apiKey: string, ticket: SubTicketInfo): Promise<string> {
-  const prompt =
-    "Write a single concise sentence (30 words or fewer) summarizing what this " +
-    `${ticket.labelName} ticket changed, suitable for a dated changelog entry. ` +
-    "Be specific and factual — no filler, no restating the ticket title verbatim.\n\n" +
-    `Ticket: "${ticket.title}"\n` +
-    `Details: ${ticket.description || "(no additional detail was provided)"}`;
-
-  return callClaude(apiKey, prompt, 120);
+  return callClaude(apiKey, prompt, 300);
 }
