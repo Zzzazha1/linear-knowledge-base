@@ -20,7 +20,7 @@ const LABEL_NAME_BY_ID: Record<string, string> = {
 };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== "POST") {
       return new Response("Linear -> Notion sync worker. POST webhooks here.", { status: 200 });
     }
@@ -39,14 +39,23 @@ export default {
       return new Response("Bad JSON", { status: 400 });
     }
 
-    try {
-      await handleWebhook(payload, env);
-      return new Response("ok", { status: 200 });
-    } catch (err) {
-      console.error(err);
-      // 500 so Linear retries — covers transient Notion/Linear API hiccups.
-      return new Response(`error: ${(err as Error).message}`, { status: 500 });
-    }
+    // Acknowledge immediately, then do the actual work (Linear lookups,
+    // Notion reads/writes, the Claude call) in the background via
+    // waitUntil. The real processing is a chain of several network calls
+    // and can comfortably exceed a webhook provider's response timeout —
+    // Linear was canceling the connection mid-flight while waiting, which
+    // could interrupt a request partway through. Acking fast avoids that;
+    // any failure during background processing is logged (check the
+    // Cloudflare dashboard's Observability > Logs), but note Linear no
+    // longer sees a failing status code to retry on, since it already got
+    // its 200.
+    ctx.waitUntil(
+      handleWebhook(payload, env).catch((err) => {
+        console.error("Background webhook processing failed", err);
+      })
+    );
+
+    return new Response("ok", { status: 200 });
   },
 };
 

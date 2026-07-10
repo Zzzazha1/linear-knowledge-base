@@ -140,3 +140,13 @@ one (already the default in `src/config.ts`) before deploying for real.
 - **No cross-run state store**: idempotency for Feature creation is done by
   querying Notion for an existing page with that Linear URL before creating
   — reliable, but means every Feature-Done event does one extra Notion read.
+- **Fire-and-forget processing, no automatic retries**: the Worker
+  acknowledges Linear's webhook immediately (`200 ok`) and does the actual
+  Linear/Notion/Claude work afterward via `ctx.waitUntil`, rather than
+  making Linear wait on the full chain of API calls. This avoids Linear's
+  webhook delivery timing out and canceling the request mid-flight (which
+  could leave a page half-updated) — but it also means Linear no longer
+  sees a failing status code if something goes wrong during that background
+  work, so it won't automatically retry. If a sync seems to be missing,
+  check the Cloudflare dashboard's **Observability → Logs** for that
+  Worker; failures are logged there with the specific error.
