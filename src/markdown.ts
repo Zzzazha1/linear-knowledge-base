@@ -1,9 +1,9 @@
 // Minimal Markdown -> Notion block converter.
 // Linear issue descriptions are plain Markdown. This covers the subset that
 // shows up in practice: headings, paragraphs, bullet/numbered/checkbox
-// lists, blockquotes, fenced code blocks, and inline bold/italic/code/links.
-// It is not a full CommonMark implementation — nested lists and tables are
-// flattened to their best plain-text approximation.
+// lists, blockquotes, fenced code blocks, GitHub-flavored pipe tables, and
+// inline bold/italic/code/links. It is not a full CommonMark implementation
+// — nested lists aren't specially handled and flatten to plain text.
 
 type RichText = {
   type: "text";
@@ -63,6 +63,24 @@ export function toRichText(line: string): RichText[] {
   if (lastIndex < line.length) pushPlain(line.slice(lastIndex));
   if (tokens.length === 0) tokens.push({ type: "text", text: { content: "" } });
   return tokens;
+}
+
+// GitHub-flavored Markdown pipe tables, e.g.:
+//   | Label | Behavior |
+//   |-------|----------|
+//   | Feature | Creates a record |
+function isPipeRow(line: string): boolean {
+  const t = line.trim();
+  return t.startsWith("|") && t.endsWith("|") && t.length > 1;
+}
+
+function splitPipeRow(line: string): string[] {
+  const t = line.trim().slice(1, -1); // strip leading/trailing pipe
+  return t.split("|").map((cell) => cell.trim());
+}
+
+function isSeparatorRow(cells: string[]): boolean {
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 }
 
 export function markdownToBlocks(markdown: string | null | undefined): NotionBlock[] {
@@ -158,6 +176,44 @@ export function markdownToBlocks(markdown: string | null | undefined): NotionBlo
       continue;
     }
 
+    // Table: a pipe row immediately followed by a "|---|---|"-style
+    // separator row marks a GitHub-flavored Markdown table.
+    if (isPipeRow(line) && i + 1 < lines.length && isSeparatorRow(splitPipeRow(lines[i + 1]))) {
+      const headerCells = splitPipeRow(line);
+      const tableWidth = headerCells.length;
+      i += 2; // skip header row + separator row
+
+      const bodyRows: string[][] = [];
+      while (i < lines.length && isPipeRow(lines[i])) {
+        bodyRows.push(splitPipeRow(lines[i]));
+        i++;
+      }
+
+      const toRow = (cells: string[]): NotionBlock => {
+        // Pad/truncate to a consistent width — Notion requires every
+        // table_row to have exactly table_width cells.
+        const padded = cells.slice(0, tableWidth);
+        while (padded.length < tableWidth) padded.push("");
+        return {
+          object: "block",
+          type: "table_row",
+          table_row: { cells: padded.map((cell) => toRichText(cell)) },
+        };
+      };
+
+      blocks.push({
+        object: "block",
+        type: "table",
+        table: {
+          table_width: tableWidth,
+          has_column_header: true,
+          has_row_header: false,
+          children: [toRow(headerCells), ...bodyRows.map(toRow)],
+        },
+      });
+      continue;
+    }
+
     // Default: paragraph (accumulate consecutive plain lines into one block)
     const paraLines = [line];
     i++;
@@ -168,7 +224,8 @@ export function markdownToBlocks(markdown: string | null | undefined): NotionBlo
       !/^[-*]\s+/.test(lines[i]) &&
       !/^\d+\.\s+/.test(lines[i]) &&
       !/^>\s?/.test(lines[i]) &&
-      !lines[i].trim().startsWith("```")
+      !lines[i].trim().startsWith("```") &&
+      !isPipeRow(lines[i])
     ) {
       paraLines.push(lines[i]);
       i++;
